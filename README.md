@@ -249,7 +249,7 @@ By default, if `auth.htpasswd.file` is set, the htpasswd login dialog will be ke
 
 With this, you can use both the htpasswd login and the OIDC login.
 
-![Login Dialog](./images/login-dialog.png)
+![Login Dialog](https://raw.githubusercontent.com/kuoruan/verdaccio-openid/main/images/login-dialog.png)
 
 ### Environment Variables
 
