@@ -55,8 +55,9 @@ const TRANSIENT_AWS_ERRORS = new Set([
 ]);
 
 function classify(err: unknown): "transient" | "permanent" {
-  const code = (err as { code?: string; name?: string } | undefined)?.code
-    ?? (err as { code?: string; name?: string } | undefined)?.name;
+  const code =
+    (err as { code?: string; name?: string } | undefined)?.code ??
+    (err as { code?: string; name?: string } | undefined)?.name;
   return code && TRANSIENT_AWS_ERRORS.has(code) ? "transient" : "permanent";
 }
 
@@ -112,10 +113,10 @@ export default class DynamoStore extends BaseStore implements Store {
   private readonly stateTTLSeconds: number;
   private readonly dataTTLSeconds: number;
 
-  constructor(opts: DynamoConfig) {
+  constructor(opts?: DynamoConfig) {
     super();
 
-    if (!opts.tableName) {
+    if (!opts?.tableName) {
       throw new Error("DynamoStore: `tableName` is required");
     }
     if (!opts.region) {
@@ -163,13 +164,16 @@ export default class DynamoStore extends BaseStore implements Store {
     }
   }
 
-  private async get<T = Record<string, unknown>>(sk: string): Promise<T | undefined> {
+  /** `consistent` is for read-after-write paths (state, webauthn);
+   *  cache-style data (userinfo, groups) tolerates eventual reads at
+   *  half the RCU cost. */
+  private async get<T = Record<string, unknown>>(sk: string, isConsistent = false): Promise<T | undefined> {
     try {
       const out = await this.client.send(
         new GetCommand({
           TableName: this.tableName,
           Key: { pk: this.pk, sk },
-          ConsistentRead: true,
+          ConsistentRead: isConsistent,
         }),
       );
       if (out.Item && typeof out.Item.expires === "number" && out.Item.expires * 1000 < Date.now()) {
@@ -178,10 +182,7 @@ export default class DynamoStore extends BaseStore implements Store {
       return out.Item as T | undefined;
     } catch (err: any) {
       const level = classify(err) === "transient" ? "warn" : "error";
-      logger[level](
-        { error: err?.name ?? "unknown", code: err?.code },
-        "DynamoStore.get failed: @{error} (@{code})",
-      );
+      logger[level]({ error: err?.name ?? "unknown", code: err?.code }, "DynamoStore.get failed: @{error} (@{code})");
       // Fail-closed reads: undefined forces the auth flow to re-issue
       // state rather than acting on stale / unavailable data.
       return undefined;
@@ -198,10 +199,7 @@ export default class DynamoStore extends BaseStore implements Store {
       );
     } catch (err: any) {
       const level = classify(err) === "transient" ? "warn" : "error";
-      logger[level](
-        { error: err?.name ?? "unknown", code: err?.code },
-        "DynamoStore.del failed: @{error} (@{code})",
-      );
+      logger[level]({ error: err?.name ?? "unknown", code: err?.code }, "DynamoStore.del failed: @{error} (@{code})");
       // Swallow on delete — a stale row will expire via TTL anyway,
       // and propagating here can break a logout flow without value.
     }
@@ -214,7 +212,7 @@ export default class DynamoStore extends BaseStore implements Store {
   }
 
   async getOpenIDState(key: string, providerId: string): Promise<string | undefined> {
-    const item = await this.get<{ nonce?: string }>(this.getStateKey(key, providerId));
+    const item = await this.get<{ nonce?: string }>(this.getStateKey(key, providerId), true);
     return item?.nonce;
   }
 
@@ -225,11 +223,7 @@ export default class DynamoStore extends BaseStore implements Store {
   async setUserInfo(key: string, data: unknown, providerId: string): Promise<void> {
     assertSize("user info key", key, MAX_KEY_BYTES);
     assertSize("user info payload", JSON.stringify(data ?? {}), MAX_VALUE_BYTES);
-    await this.put(
-      this.getUserInfoKey(key, providerId),
-      { data: data as Record<string, unknown> },
-      this.dataTTLSeconds,
-    );
+    await this.put(this.getUserInfoKey(key, providerId), { data: data }, this.dataTTLSeconds);
   }
 
   async getUserInfo(key: string, providerId: string): Promise<Record<string, unknown> | undefined> {
@@ -259,7 +253,7 @@ export default class DynamoStore extends BaseStore implements Store {
   }
 
   async getWebAuthnToken(key: string): Promise<string | undefined> {
-    const item = await this.get<{ token?: string }>(this.getWebAuthnTokenKey(key));
+    const item = await this.get<{ token?: string }>(this.getWebAuthnTokenKey(key), true);
     return item?.token;
   }
 
@@ -276,7 +270,7 @@ export default class DynamoStore extends BaseStore implements Store {
    */
   async takeWebAuthnToken(key: string, pendingToken: string): Promise<string | undefined> {
     const sk = this.getWebAuthnTokenKey(key);
-    const item = await this.get<{ token?: string }>(sk);
+    const item = await this.get<{ token?: string }>(sk, true);
     const current = item?.token;
     if (current === undefined) return undefined;
     if (current === pendingToken) return current;

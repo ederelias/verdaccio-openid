@@ -4,20 +4,25 @@ import DynamoStore from "@/server/store/Dynamo";
 import { BaseStore } from "@/server/store/Store";
 
 // Mock the AWS SDK v3 DocumentClient. Every test resets the send()
-// implementation per its needs.
-const { sendMock, destroyMock } = vi.hoisted(() => ({
+// implementation per its needs. AWS SDK Command classes use `new` —
+// mock them as classes carrying a tag + the raw input so tests can
+// assert what the store sent. Everything lives in vi.hoisted because
+// vi.mock factories are hoisted above module-scope consts.
+const { sendMock, destroyMock, makeCommand } = vi.hoisted(() => ({
   sendMock: vi.fn(),
   destroyMock: vi.fn(),
+  makeCommand: (type: string) =>
+    class {
+      commandType = type;
+
+      constructor(public input: any) {}
+    },
 }));
 
 vi.mock("@aws-sdk/client-dynamodb", () => ({
-  DynamoDBClient: vi.fn(function MockClient(this: unknown) {
-    return { destroy: destroyMock };
-  }),
+  DynamoDBClient: class {},
 }));
 
-// AWS SDK Command classes use `new` — mock them as constructors that
-// return tagged plain objects so we can assert what the store sent.
 vi.mock("@aws-sdk/lib-dynamodb", () => ({
   DynamoDBDocumentClient: {
     from: vi.fn(() => ({
@@ -25,18 +30,9 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
       destroy: destroyMock,
     })),
   },
-  PutCommand: vi.fn(function (this: any, input: unknown) {
-    this.__type = "Put";
-    this.input = input;
-  }),
-  GetCommand: vi.fn(function (this: any, input: unknown) {
-    this.__type = "Get";
-    this.input = input;
-  }),
-  DeleteCommand: vi.fn(function (this: any, input: unknown) {
-    this.__type = "Delete";
-    this.input = input;
-  }),
+  PutCommand: makeCommand("Put"),
+  GetCommand: makeCommand("Get"),
+  DeleteCommand: makeCommand("Delete"),
 }));
 
 const baseConfig = { tableName: "test-table", region: "us-east-1" };
@@ -54,6 +50,28 @@ describe("DynamoStore — required config", () => {
   it("throws if region is missing", () => {
     expect(() => new DynamoStore({ tableName: "x" } as any)).toThrow(/region/);
   });
+
+  it("throws a clear error when config is missing entirely", () => {
+    expect(() => new DynamoStore()).toThrow(/tableName/);
+  });
+});
+
+describe("DynamoStore — read consistency", () => {
+  it("uses strongly consistent reads for state (read-after-write path)", async () => {
+    sendMock.mockResolvedValue({});
+    const store = new DynamoStore(baseConfig);
+
+    await store.getOpenIDState("k", "openid");
+    expect(sendMock.mock.calls[0][0].input.ConsistentRead).toBe(true);
+  });
+
+  it("uses eventually consistent reads for userinfo (cache path)", async () => {
+    sendMock.mockResolvedValue({});
+    const store = new DynamoStore(baseConfig);
+
+    await store.getUserInfo("k", "openid");
+    expect(sendMock.mock.calls[0][0].input.ConsistentRead).toBe(false);
+  });
 });
 
 describe("DynamoStore — openid state", () => {
@@ -65,7 +83,7 @@ describe("DynamoStore — openid state", () => {
 
     expect(sendMock).toHaveBeenCalledOnce();
     const cmd = sendMock.mock.calls[0][0];
-    expect(cmd.__type).toBe("Put");
+    expect(cmd.commandType).toBe("Put");
     expect(cmd.input.TableName).toBe("test-table");
     expect(cmd.input.Item.pk).toBe("OIDC");
     expect(cmd.input.Item.sk).toBe("openid:state:session-abc");
@@ -161,7 +179,7 @@ describe("DynamoStore — user info + groups", () => {
 
     await store.setUserGroups("user", [], "openid");
     expect(sendMock).toHaveBeenCalledOnce();
-    expect(sendMock.mock.calls[0][0].__type).toBe("Delete");
+    expect(sendMock.mock.calls[0][0].commandType).toBe("Delete");
   });
 
   it("setUserGroups writes the array when non-empty", async () => {
@@ -170,7 +188,7 @@ describe("DynamoStore — user info + groups", () => {
 
     await store.setUserGroups("user", ["g1", "g2"], "openid");
     const cmd = sendMock.mock.calls[0][0];
-    expect(cmd.__type).toBe("Put");
+    expect(cmd.commandType).toBe("Put");
     expect(cmd.input.Item.groups).toEqual(["g1", "g2"]);
   });
 
@@ -209,7 +227,7 @@ describe("DynamoStore — webauthn takeWebAuthnToken (atomic CAS)", () => {
     expect(result).toBe("pending-T");
     // Only the GET call — no DELETE, because current === pending.
     expect(sendMock).toHaveBeenCalledOnce();
-    expect(sendMock.mock.calls[0][0].__type).toBe("Get");
+    expect(sendMock.mock.calls[0][0].commandType).toBe("Get");
   });
 
   it("conditionally DELETEs (token = current) on a ready token, returns value on success", async () => {
@@ -228,7 +246,7 @@ describe("DynamoStore — webauthn takeWebAuthnToken (atomic CAS)", () => {
     expect(result).toBe("real-T");
     expect(sendMock).toHaveBeenCalledTimes(2);
     const del = sendMock.mock.calls[1][0];
-    expect(del.__type).toBe("Delete");
+    expect(del.commandType).toBe("Delete");
     expect(del.input.ConditionExpression).toBe("#t = :current");
     expect(del.input.ExpressionAttributeValues[":current"]).toBe("real-T");
   });
@@ -249,9 +267,9 @@ describe("DynamoStore — webauthn takeWebAuthnToken (atomic CAS)", () => {
         expires: Math.floor(Date.now() / 1000) + 60,
       },
     });
-    const err = new Error("ConditionalCheckFailedException");
-    err.name = "ConditionalCheckFailedException";
-    sendMock.mockRejectedValueOnce(err);
+    // Plain object — the store only reads `name`/`code`, and building a
+    // real Error would trip unicorn/no-error-property-assignment.
+    sendMock.mockRejectedValueOnce({ name: "ConditionalCheckFailedException" });
 
     const store = new DynamoStore(baseConfig);
 
