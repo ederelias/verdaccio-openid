@@ -22,9 +22,12 @@ let logger: Logger = dummyLogger;
 export function setLogger(l?: Logger) {
   if (!l) return;
 
-  // eslint-disable-next-line unicorn/no-top-level-assignment-in-function
   logger = l.child({ plugin: { name: plugin.name } });
   logger?.info(plugin, "plugin loading: @{name}@@{version}");
 }
 
-export default logger;
+// Use named-export-as-default to create a live binding so that
+// `setLogger()` reassignments are visible to every importer.
+// `export default logger` would capture the initial dummyLogger
+// value and never update.
+export { logger as default };

@@ -16,8 +16,14 @@ function svgPlugin() {
   return {
     name: "svg",
     load: {
-      filter: { id: /\.svg$/ },
+      filter: { id: /\.svg(\?raw)?$/ },
       handler(id) {
+        if (id.endsWith("?raw")) {
+          const filePath = id.slice(0, -4);
+          const code = fs.readFileSync(filePath, "utf8");
+          return `export default ${JSON.stringify(code)}`;
+        }
+
         if (!id.endsWith(".svg")) return null;
 
         const code = fs.readFileSync(id, "utf8");
@@ -39,7 +45,7 @@ export default defineConfig([
     fixedExtension: false,
     target: "node20",
     deps: {
-      skipNodeModulesBundle: true,
+      neverBundle: true,
     },
     outputOptions: {
       exports: "named",
@@ -54,7 +60,7 @@ export default defineConfig([
     define,
     target: "node20",
     deps: {
-      skipNodeModulesBundle: true,
+      neverBundle: true,
     },
     plugins: [svgPlugin()],
   },
