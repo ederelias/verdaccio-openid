@@ -93,7 +93,7 @@ auth:
 
 如果配置了 `auth.htpasswd.file`，登录页面会先显示用户名/密码输入框，OIDC 登录按钮显示在下方，允许用户选择任一方式登录。
 
-![登录对话框](docs/images/login-dialog.png)
+![登录对话框](https://raw.githubusercontent.com/kuoruan/verdaccio-openid/main/docs/images/login-dialog.png)
 
 显式设置 `keep-passwd-login` 可以覆盖自动检测行为。详见 [keep-passwd-login](docs/zh-CN/configuration.md#keep-passwd-login)。
 

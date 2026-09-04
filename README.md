@@ -93,7 +93,7 @@ Once configured, clicking the login button redirects directly to the OIDC provid
 
 If `auth.htpasswd.file` is configured, the login dialog appears first with username/password fields, and the OIDC login button is shown below them — allowing users to choose either method.
 
-![Login Dialog](docs/images/login-dialog.png)
+![Login Dialog](https://raw.githubusercontent.com/kuoruan/verdaccio-openid/main/docs/images/login-dialog.png)
 
 Set `keep-passwd-login` explicitly to override the auto-detection. See [keep-passwd-login](docs/configuration.md#keep-passwd-login) for details.
 
