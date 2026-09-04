@@ -24,6 +24,10 @@
   ],
   "main": "./dist/server/index.js",
   "module": "./dist/server/index.mjs",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://npm.shared-dev.swipejobs.com/"
+  },
   "scripts": {
     "build": "cross-env NODE_ENV=production tsdown",
     "start": "cross-env DEBUG='verdaccio:*' node_modules/verdaccio/bin/verdaccio -c verdaccio/verdaccio.yml",
@@ -120,9 +124,5 @@
       "side-channel": "npm:@nolyfill/side-channel@^1",
       "hasown": "npm:@nolyfill/hasown@^1"
     }
-  },
-  "publishConfig": {
-    "registry": "https://npm.shared-dev.swipejobs.com/",
-    "access": "public"
   }
 }
