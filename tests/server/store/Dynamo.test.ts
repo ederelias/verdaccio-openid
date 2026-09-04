@@ -56,9 +56,10 @@ describe("DynamoStore — required config", () => {
   });
 
   it("throws a readable error when the store config block is absent", () => {
-    // Without the optional chain this is a TypeError on undefined, which
-    // tells an operator nothing about the missing config.
-    expect(() => new DynamoStore(undefined as any)).toThrow(/tableName/);
+    // Without the optional chain this is a TypeError whose message happens to
+    // contain "tableName" too, so match the real error and its type.
+    expect(() => new DynamoStore(undefined as any)).toThrow("DynamoStore: `tableName` is required");
+    expect(() => new DynamoStore(undefined as any)).not.toThrow(TypeError);
   });
 });
 
